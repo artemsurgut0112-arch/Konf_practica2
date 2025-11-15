@@ -3,6 +3,8 @@ import sys
 import csv
 import json
 import os
+import urllib.request
+import urllib.error
 
 class DependencyVisualizer:
     def __init__(self, input_type: str = 'command_line'):
@@ -16,6 +18,9 @@ class DependencyVisualizer:
         
         self.validate_params()
         self.print_params()
+        
+        # Этап 2: Сбор данных
+        self.dependencies = self.collect_dependencies()
 
     def parse_command_line(self):
         """Парсинг аргументов командной строки для 19 варианта"""
@@ -152,18 +157,130 @@ class DependencyVisualizer:
         print(f"Максимальная глубина: {self.params['max_depth']}")
         print("============================================")
 
+    def collect_dependencies(self):
+        """Этап 2: Сбор данных о зависимостях npm пакетов"""
+        print(f"\nНачинаем сбор данных для пакета: {self.params['package_name']}")
+        
+        if self.params['test_mode']:
+            return self.collect_dependencies_test()
+        else:
+            return self.collect_dependencies_npm()
+
+    def collect_dependencies_npm(self):
+        """Сбор зависимостей из npm репозитория"""
+        package_name = self.params['package_name']
+        repo_url = self.params['repo_url']
+        
+        try:
+            # Формируем URL для npm registry API
+            if 'registry.npmjs.org' in repo_url:
+                npm_url = f"{repo_url}/{package_name}"
+            else:
+                npm_url = f"https://registry.npmjs.org/{package_name}"
+            
+            print(f"Запрос к: {npm_url}")
+            
+            # Запрашиваем информацию о пакете
+            with urllib.request.urlopen(npm_url) as response:
+                data = json.loads(response.read().decode('utf-8'))
+            
+            # Получаем последнюю версию
+            latest_version = data.get('dist-tags', {}).get('latest')
+            if not latest_version:
+                raise ValueError("Не удалось определить последнюю версию пакета")
+            
+            # Получаем зависимости для последней версии
+            version_data = data.get('versions', {}).get(latest_version, {})
+            dependencies = version_data.get('dependencies', {})
+            
+            # Выводим прямые зависимости (требование этапа)
+            print(f"\nПрямые зависимости пакета '{package_name}' (версия {latest_version}):")
+            print("=" * 50)
+            
+            if dependencies:
+                for dep_name, dep_version in dependencies.items():
+                    print(f"  • {dep_name}: {dep_version}")
+            else:
+                print("Пакет не имеет зависимостей!")
+            
+            print("=" * 50)
+            
+            return dependencies
+            
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise ValueError(f"Пакет '{package_name}' не найден в npm репозитории")
+            else:
+                raise ValueError(f"Ошибка при запросе к npm: {e}")
+        except urllib.error.URLError as e:
+            raise ValueError(f"Ошибка сети: {e}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Ошибка при разборе JSON ответа: {e}")
+        except Exception as e:
+            raise ValueError(f"Неожиданная ошибка при сборе данных: {e}")
+
+    def collect_dependencies_test(self):
+        """Тестовый режим - используем заранее подготовленные данные"""
+        print("Работаем в тестовом режиме")
+        
+        # Тестовые данные для популярных npm пакетов
+        test_dependencies = {
+            'react': {
+                'loose-envify': '^1.1.0',
+                'object-assign': '^4.1.1'
+            },
+            'express': {
+                'accepts': '~1.3.8',
+                'array-flatten': '1.1.1',
+                'body-parser': '1.20.2',
+                'content-disposition': '0.5.4',
+                'cookie': '0.5.0',
+                'cookie-signature': '1.0.6'
+            },
+            'lodash': {},  # lodash не имеет зависимостей
+            'vue': {
+                '@vue/compiler-sfc': '^3.3.0',
+                '@vue/shared': '^3.3.0'
+            }
+        }
+        
+        package_name = self.params['package_name']
+        
+        if package_name in test_dependencies:
+            dependencies = test_dependencies[package_name]
+            
+            print(f"\nПрямые зависимости пакета '{package_name}' (тестовый режим):")
+            print("=" * 50)
+            
+            if dependencies:
+                for dep_name, dep_version in dependencies.items():
+                    print(f"  • {dep_name}: {dep_version}")
+            else:
+                print("Пакет не имеет зависимостей!")
+            
+            print("=" * 50)
+            
+            return dependencies
+        else:
+            # Если пакет не в тестовых данных, имитируем пустые зависимости
+            print(f"\nПакет '{package_name}' не имеет зависимостей (тестовый режим)")
+            return {}
+
 def main():
     """Основная функция для запуска приложения"""
     try:
-        # Можно легко переключаться между command_line и csv_file
+        # Создаем визуализатор (автоматически выполняет этап 1 и 2)
         visualizer = DependencyVisualizer(input_type='command_line')
         
-        # Сообщение о готовности к следующим этапам
-        print("\n✅ Этап 1 выполнен успешно!")
-        print("Конфигурация загружена. Приложение готово к реализации этапа 2.")
+        # Сообщение об успешном завершении этапов
+        print("\nЭтап 1 выполнен успешно!")
+        print("Этап 2 выполнен успешно! Данные о зависимостях собраны.")
+        print("\nСтатистика:")
+        print(f"   - Найдено зависимостей: {len(visualizer.dependencies)}")
+        print(f"   - Пакет готов к анализу графа зависимостей")
         
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"Ошибка: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
